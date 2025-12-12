@@ -1,3 +1,4 @@
+# test_integrity.py
 import requests, hashlib, sys
 
 BASE = "http://127.0.0.1:5000"
@@ -27,42 +28,32 @@ def download_file(file_id, out):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("usage: python test_integrity.py <original-file-path>")
+        print("usage: python test_integrity.py <local-file-to-test>")
         sys.exit(1)
 
     path = sys.argv[1]
+    print("Uploading", path)
 
-    print("Uploading:", path)
-    code, resp = upload_file(path)
+    code, _ = upload_file(path)
     if code not in (200, 302):
-        print("Upload failed:", code, resp)
+        print("Upload failed", code)
         sys.exit(2)
 
     files = list_files()
-    if not files:
-        print("No files found on server.")
-        sys.exit(3)
+    fid = files[0]['id']  # newest file first
 
-    latest = files[0]
-    fid = latest['id']
-    print("Downloading file ID:", fid)
+    print("Downloading id", fid)
 
-    out_path = "download_testfile"
-    ok, err = download_file(fid, out_path)
+    ok, err = download_file(fid, "/tmp/download_test")
     if not ok:
         print("Download failed:", err)
-        sys.exit(4)
+        sys.exit(3)
 
-    print("Comparing SHA256...")
+    with open(path, "rb") as a, open("/tmp/download_test", "rb") as b:
+        h1 = hashlib.sha256(a.read()).hexdigest()
+        h2 = hashlib.sha256(b.read()).hexdigest()
 
-    with open(path, "rb") as f1, open(out_path, "rb") as f2:
-        h1 = sha256_bytes(f1.read())
-        h2 = sha256_bytes(f2.read())
+    print("Original sha256:", h1)
+    print("Downloaded sha256:", h2)
+    print("MATCH" if h1 == h2 else "MISMATCH")
 
-    print("Original SHA256 :", h1)
-    print("Downloaded SHA256:", h2)
-
-    if h1 == h2:
-        print("MATCH ✔️ Encryption/Decryption successful!")
-    else:
-        print("MISMATCH ❌ Something is wrong.")
