@@ -7,6 +7,7 @@ from flask import Flask, request, render_template, send_file, redirect, url_for,
 from Crypto.Cipher import AES
 from Crypto.Protocol.KDF import PBKDF2
 from Crypto.Random import get_random_bytes
+from Crypto.Hash import SHA256
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
@@ -47,21 +48,28 @@ def get_db():
 
 db = get_db()
 
-def derive_key(passphrase: bytes, salt: bytes = None, iterations: int = 200000, key_len=32):
-    """Derive a 256-bit AES key from passphrase using PBKDF2-HMAC-SHA256."""
+def derive_key(passphrase, salt: bytes = None, iterations: int = 200000, key_len=32):
+    """
+    Derive a 256-bit AES key from passphrase using PBKDF2-HMAC-SHA256.
+    Accepts passphrase as str or bytes.
+    """
+    if isinstance(passphrase, str):
+        passphrase = passphrase.encode()
     if salt is None:
         salt = b"static_salt_please_change"
-    # PBKDF2 from PyCryptodome; specify hash via hmac_hash_module from Crypto.Hash import SHA256
-    from Crypto.Hash import SHA256
+    elif isinstance(salt, str):
+        salt = salt.encode()
     return PBKDF2(passphrase, salt, dkLen=key_len, count=iterations, hmac_hash_module=SHA256)
 
 def encrypt_bytes(plaintext: bytes, key: bytes) -> bytes:
-    nonce = get_random_bytes(12)
+    """Encrypt plaintext bytes with AES-GCM. Return nonce||tag||ciphertext."""
+    nonce = get_random_bytes(12)  # recommended 12 bytes for GCM
     cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
     ciphertext, tag = cipher.encrypt_and_digest(plaintext)
     return nonce + tag + ciphertext
 
 def decrypt_bytes(blob: bytes, key: bytes) -> bytes:
+    """Decrypt blob produced by encrypt_bytes."""
     if len(blob) < 28:
         raise ValueError("Invalid blob")
     nonce = blob[:12]
@@ -77,8 +85,8 @@ def file_sha256(data: bytes) -> str:
     return h.hexdigest()
 
 # derive app key once
-SALT_BYTES = SALT.encode() if SALT else None
-APP_KEY = derive_key(MASTER_PASSPHRASE.encode(), salt=SALT_BYTES, iterations=KEY_ITER)
+SALT_BYTES = SALT.encode() if (SALT and isinstance(SALT, str)) else (SALT if isinstance(SALT, bytes) else None)
+APP_KEY = derive_key(MASTER_PASSPHRASE, salt=SALT_BYTES, iterations=KEY_ITER)
 
 @app.route("/")
 def index():
@@ -103,6 +111,7 @@ def upload():
     sha = file_sha256(data)
     encrypted = encrypt_bytes(data, APP_KEY)
 
+    # stored filename: a random name to avoid revealing original name in storage
     stored_name = hashlib.sha256(get_random_bytes(16)).hexdigest()
     stored_path = os.path.join(STORAGE_DIR, stored_name)
 
@@ -137,6 +146,7 @@ def download(file_id):
     except Exception as e:
         return f"Decryption failed: {str(e)}", 500
 
+    # verify integrity
     if file_sha256(plaintext) != orig_sha:
         return "Integrity check failed", 500
 
@@ -164,3 +174,4 @@ def api_list():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
