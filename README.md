@@ -135,7 +135,6 @@ Run this after the server is running:
 
 python test_integrity.py "path/to/original/file.pdf"
 
-
 Expected:
 
 MATCH ✔️ Encryption/Decryption successful!
